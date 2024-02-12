@@ -329,7 +329,7 @@ class Scratch3LooksBlocks {
 
     say (args, util) {
         // @TODO in 2.0 calling say/think resets the right/left bias of the bubble
-        this.runtime.emit(Scratch3LooksBlocks.SAY_OR_THINK, util.target, 'say', args.MESSAGE);
+        this.runtime.emit(Scratch3LooksBlocks.SAY_OR_THINK, util.target, 'say', Cast.toString(args.MESSAGE));
     }
 
     sayforsecs (args, util) {
@@ -349,7 +349,7 @@ class Scratch3LooksBlocks {
     }
 
     think (args, util) {
-        this.runtime.emit(Scratch3LooksBlocks.SAY_OR_THINK, util.target, 'think', args.MESSAGE);
+        this.runtime.emit(Scratch3LooksBlocks.SAY_OR_THINK, util.target, 'think', Cast.toString(args.MESSAGE));
     }
 
     thinkforsecs (args, util) {
