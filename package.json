@@ -1,6 +1,6 @@
 {
   "name": "scratch-vm",
-  "version": "4.5.116",
+  "version": "4.5.129",
   "description": "Virtual Machine for Scratch 3.0",
   "author": "Massachusetts Institute of Technology",
   "license": "BSD-3-Clause",
@@ -8,7 +8,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/scratchfoundation/scratch-vm.git",
-    "sha": "ceab4e95135ae2e614257b87d8117007a4a92fe5"
+    "sha": "a8e2842cf7b0eb930c1caba3d88bebcb58525850"
   },
   "main": "./dist/node/scratch-vm.js",
   "browser": "./dist/web/scratch-vm.js",
@@ -70,7 +70,7 @@
     "scratch-render": "^1.0.13",
     "scratch-sb1-converter": "^1.0.0",
     "scratch-storage": "^2.3.5",
-    "scratch-svg-renderer": "2.3.32",
+    "scratch-svg-renderer": "2.3.36",
     "scratch-translate-extension-languages": "^1.0.0",
     "text-encoding": "^0.7.0",
     "uuid": "^8.3.2",
@@ -98,9 +98,9 @@
     "jsdoc": "3.6.11",
     "json": "^9.0.4",
     "pngjs": "3.4.0",
-    "scratch-blocks": "1.1.98",
-    "scratch-l10n": "3.18.122",
-    "scratch-render-fonts": "1.0.40",
+    "scratch-blocks": "1.1.104",
+    "scratch-l10n": "3.18.128",
+    "scratch-render-fonts": "1.0.42",
     "scratch-semantic-release-config": "1.0.14",
     "scratch-webpack-configuration": "1.3.0",
     "script-loader": "0.7.2",
