@@ -1,6 +1,6 @@
 {
   "name": "scratch-vm",
-  "version": "4.5.129",
+  "version": "4.6.0",
   "description": "Virtual Machine for Scratch 3.0",
   "author": "Massachusetts Institute of Technology",
   "license": "BSD-3-Clause",
@@ -8,7 +8,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/scratchfoundation/scratch-vm.git",
-    "sha": "a8e2842cf7b0eb930c1caba3d88bebcb58525850"
+    "sha": "e0d50bf10c67c8520ca36b718708a7ea7247feff"
   },
   "main": "./dist/node/scratch-vm.js",
   "browser": "./dist/web/scratch-vm.js",
@@ -67,19 +67,19 @@
     "minilog": "^3.1.0",
     "scratch-audio": "^1.0.6",
     "scratch-parser": "^5.1.1",
-    "scratch-render": "^1.0.13",
+    "scratch-render": "^1.0.232",
     "scratch-sb1-converter": "^1.0.0",
     "scratch-storage": "^2.3.5",
-    "scratch-svg-renderer": "2.3.36",
+    "scratch-svg-renderer": "2.4.0",
     "scratch-translate-extension-languages": "^1.0.0",
     "text-encoding": "^0.7.0",
     "uuid": "^8.3.2",
     "web-worker": "^1.3.0"
   },
   "devDependencies": {
-    "@babel/core": "7.24.4",
-    "@babel/eslint-parser": "7.24.1",
-    "@babel/preset-env": "7.24.4",
+    "@babel/core": "7.25.2",
+    "@babel/eslint-parser": "7.25.1",
+    "@babel/preset-env": "7.25.4",
     "@commitlint/cli": "17.8.1",
     "@commitlint/config-conventional": "17.8.1",
     "adm-zip": "0.4.11",
@@ -98,16 +98,16 @@
     "jsdoc": "3.6.11",
     "json": "^9.0.4",
     "pngjs": "3.4.0",
-    "scratch-blocks": "1.1.104",
-    "scratch-l10n": "3.18.128",
-    "scratch-render-fonts": "1.0.42",
+    "scratch-blocks": "1.1.206",
+    "scratch-l10n": "3.18.295",
+    "scratch-render-fonts": "1.0.95",
     "scratch-semantic-release-config": "1.0.14",
-    "scratch-webpack-configuration": "1.3.0",
+    "scratch-webpack-configuration": "1.5.0",
     "script-loader": "0.7.2",
     "semantic-release": "19.0.5",
     "stats.js": "0.17.0",
     "tap": "16.3.10",
-    "webpack": "5.91.0",
+    "webpack": "5.94.0",
     "webpack-cli": "4.10.0",
     "webpack-dev-server": "3.11.3"
   }
