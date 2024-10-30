@@ -30,6 +30,11 @@ class Cast {
             }
             return value;
         }
+        if (typeof value === 'string') {
+            // Replace full-width numbers with half-width ones.
+            value = value.replace(/[０-９＋．ｅ]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+            value = value.replace(/[-－﹣−‐⁃‑‒–—﹘―⎯⏤ーｰ─━]/g, '-');
+        }
         const n = Number(value);
         if (Number.isNaN(n)) {
             // Scratch treats NaN as 0, when needed as a number.
@@ -71,7 +76,9 @@ class Cast {
      * @return {string} The Scratch-casted string value.
      */
     static toString (value) {
-        return String(value);
+        return String(value)
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, '\t');
     }
 
     /**
@@ -129,8 +136,8 @@ class Cast {
         if (isNaN(n1) || isNaN(n2)) {
             // At least one argument can't be converted to a number.
             // Scratch compares strings as case insensitive.
-            const s1 = String(v1).toLowerCase();
-            const s2 = String(v2).toLowerCase();
+            const s1 = Cast.toString(v1).toLowerCase();
+            const s2 = Cast.toString(v2).toLowerCase();
             if (s1 < s2) {
                 return -1;
             } else if (s1 > s2) {

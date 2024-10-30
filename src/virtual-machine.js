@@ -51,6 +51,8 @@ class VirtualMachine extends EventEmitter {
          * @type {!Runtime}
          */
         this.runtime = new Runtime();
+        this.runtime.formatMessage = formatMessage; // allow extensions to access formatMessage
+        this.runtime.vm = this; // allow extensions to access the VirtualMachine
         centralDispatch.setService('runtime', this.runtime).catch(e => {
             log.error(`Failed to register runtime service: ${JSON.stringify(e)}`);
         });

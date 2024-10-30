@@ -135,6 +135,66 @@ class ExtensionManager {
     }
 
     /**
+     * Fetch URL and return entry object and block class of the extension.
+     * @param {string} extensionURL - URL for module of the extension.
+     * @returns {{entry: object, blockClass: BlockClass}} Array with entry and block class of the extension.
+     */
+    fetchExtension (extensionURL) {
+        return import(/* webpackIgnore: true */ extensionURL)
+            .then(module => {
+                const entry = module.entry;
+                entry.extensionURL = extensionURL;
+                const blockClass = module.blockClass;
+                blockClass.extensionURL = extensionURL;
+                return {entry: entry, blockClass: blockClass};
+            });
+    }
+
+    addBultinExtension (entry, blockClass) {
+        builtinExtensions[entry.extensionId] = () => blockClass;
+        this.extensionLibraryContent.unshift(entry);
+    }
+
+    /**
+     * Instanceate new block object and register that in the runtime.
+     * @param {object} entry - Entry object to register.
+     * @param {class} blockClass - Class of block object to regiser.
+     * @returns {object} Block object which was registered.
+     */
+    registerExtensionBlock (entry, blockClass) {
+        const extensionInstance = new blockClass(this.runtime);
+        const extensionID = extensionInstance.getInfo().id;
+        if (entry.extensionId !== extensionID) {
+            // Reject by the security risk.
+            throw new Error(`Extension ID mismatch entry: '${entry.extensionId}' block: '${extensionID}'`);
+        }
+        if (this.isExtensionLoaded(extensionID)) {
+            // Remove from loaded extensions
+            const oldServiceName = this._loadedExtensions.get(extensionID);
+            this._loadedExtensions.delete(extensionID);
+            // Remove from dispatcher
+            delete dispatch.services[oldServiceName];
+            // Remove from block info
+            const oldBlockInfoIndex = this.runtime._blockInfo.findIndex(info => info.id === extensionID);
+            if (oldBlockInfoIndex >= 0) {
+                this.runtime._blockInfo.splice(oldBlockInfoIndex, 1);
+            }
+        }
+        const serviceName = this._registerInternalExtension(extensionInstance);
+        this._loadedExtensions.set(extensionID, serviceName);
+        const oldEntryIndex = this.extensionLibraryContent
+            .findIndex(libEntry => libEntry.extensionId === extensionID);
+        if (oldEntryIndex >= 0) {
+            // Remove from extension library
+            this.extensionLibraryContent.splice(oldEntryIndex, 1);
+        }
+        if (this.extensionLibraryContent) {
+            this.extensionLibraryContent.unshift(entry);
+        }
+        return extensionInstance;
+    }
+
+    /**
      * Load an extension by URL or internal extension ID
      * @param {string} extensionURL - the URL for the extension to load OR the ID of an internal extension
      * @returns {Promise} resolved once the extension is loaded and initialized or rejected on failure
@@ -155,13 +215,26 @@ class ExtensionManager {
             return Promise.resolve();
         }
 
-        return new Promise((resolve, reject) => {
-            // If we `require` this at the global level it breaks non-webpack targets, including tests
-            const worker = new Worker('./extension-worker.js');
+        // Find a builtin extension which have the extensionURL.
+        const builtinClassFunc = Object.values(builtinExtensions)
+            .find(blockClassFunc => blockClassFunc().extensionURL === extensionURL);
+        if (builtinClassFunc) {
+            const blockClass = builtinClassFunc();
+            const extensionInstance = new blockClass(this.runtime);
+            const serviceName = this._registerInternalExtension(extensionInstance);
+            this._loadedExtensions.set(blockClass.EXTENSION_ID, serviceName);
+            return Promise.resolve();
+        }
 
-            this.pendingExtensions.push({extensionURL, resolve, reject});
-            dispatch.addWorker(worker);
-        });
+        // To access the runtime even in outer extensions, it loaded by dynamic import() instead of extension-worker.
+        return this.fetchExtension(extensionURL)
+            .then(({entry, blockClass}) => {
+                this.registerExtensionBlock(entry, blockClass);
+            })
+            .catch(error => {
+                log.log(error);
+                // Ignore error to continue loading lest of the project data.
+            });
     }
 
     /**

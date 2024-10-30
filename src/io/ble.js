@@ -1,4 +1,5 @@
 const JSONRPC = require('../util/jsonrpc');
+const WebBLE = require('./ble-web');
 
 class BLE extends JSONRPC {
 
@@ -253,4 +254,4 @@ class BLE extends JSONRPC {
     }
 }
 
-module.exports = BLE;
+module.exports = navigator.bluetooth ? WebBLE : BLE;
