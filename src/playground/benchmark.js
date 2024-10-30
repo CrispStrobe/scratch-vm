@@ -1,23 +1,23 @@
-// Track loading time with timestamps and if possible the performance api.
+// Track loading time with timestamps and, if possible, the performance API.
 if (window.performance) {
-    // Mark with the performance API when benchmark.js and its dependecies start
-    // evaluation. This can tell us once measured how long the code spends time
-    // turning into execution code for the first time. Skipping evaluation of
-    // some of the code can help us make it faster.
     performance.mark('Scratch.EvalStart');
 }
 
+// Declare the LoadingMiddleware class first
+/**
+ * LoadingMiddleware class to handle middleware during asset loading.
+ */
 class LoadingMiddleware {
-    constructor () {
+    constructor() {
         this.middleware = [];
         this.host = null;
         this.original = null;
     }
 
-    install (host, original) {
+    install(host, original) {
         this.host = host;
         this.original = original;
-        const {middleware} = this;
+        const { middleware } = this;
         return function (...args) {
             let i = 0;
             const next = function (_args) {
@@ -30,11 +30,12 @@ class LoadingMiddleware {
         };
     }
 
-    push (middleware) {
+    push(middleware) {
         this.middleware.push(middleware);
     }
 }
 
+// Now we can safely use LoadingMiddleware
 const importLoadCostume = require('../import/load-costume');
 const costumeMiddleware = new LoadingMiddleware();
 importLoadCostume.loadCostume = costumeMiddleware.install(importLoadCostume, importLoadCostume.loadCostume);
@@ -53,19 +54,29 @@ const ScratchSVGRenderer = require('scratch-svg-renderer');
 
 const Scratch = window.Scratch = window.Scratch || {};
 
-const ASSET_SERVER = 'https://cdn.assets.scratch.mit.edu/';
-const PROJECT_SERVER = 'https://cdn.projects.scratch.mit.edu/';
-
-const SLOW = .1;
+const SLOW = 0.1;
 
 const projectInput = document.querySelector('input');
 
-document.querySelector('.run')
-    .addEventListener('click', () => {
-        window.location.hash = projectInput.value;
-        location.reload();
-    }, false);
+// Declare canvas at the top level
+const canvas = document.getElementById('scratch-stage');
 
+/**
+ * Event listener that calls runBenchmark.
+ */
+document.querySelector('.run').addEventListener('click', async () => {
+    try {
+        window.location.hash = projectInput.value;
+        await runBenchmark();
+    } catch (err) {
+        console.error('Error running benchmark:', err);
+    }
+}, false);
+
+/**
+ * Set the share link based on benchmark data.
+ * @param {object} json - Benchmark data.
+ */
 const setShareLink = function (json) {
     document.querySelector('.share')
         .href = `#view/${btoa(JSON.stringify(json))}`;
@@ -73,46 +84,182 @@ const setShareLink = function (json) {
         .href = `suite.html`;
 };
 
-const loadProject = function () {
+/**
+ * Load the project from a local .sb3 file.
+ * @returns {string} The project filename without extension.
+ */
+function loadProject() {
     let id = location.hash.substring(1).split(',')[0];
-    if (id.length < 1 || !isFinite(id)) {
-        id = projectInput.value;
+    if (!id || !id.length) {
+        id = projectInput.value || 'default_project';
     }
-    Scratch.vm.downloadProjectId(id);
+    console.log('Loading project:', id);
     return id;
-};
+}
 
 /**
- * @param {Asset} asset - calculate a URL for this asset.
- * @returns {string} a URL to download a project file.
+ * Run the benchmark with given parameters in the location's hash field or
+ * using defaults.
  */
-const getProjectUrl = function (asset) {
-    const assetIdParts = asset.assetId.split('.');
-    const assetUrlParts = [PROJECT_SERVER, 'internalapi/project/', assetIdParts[0], '/get/'];
-    if (assetIdParts[1]) {
-        assetUrlParts.push(assetIdParts[1]);
+async function runBenchmark() {
+    try {
+        const vm = new VirtualMachine();
+        Scratch.vm = vm;
+
+        vm.setTurboMode(true);
+
+        const storage = new ScratchStorage();
+        vm.attachStorage(storage);
+
+        // Instantiate the renderer and connect it to the VM.
+        Scratch.renderer = new ScratchRender(canvas);
+        vm.attachRenderer(Scratch.renderer);
+        vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+
+        // Initialize audio after user interaction
+        const audioEngine = new AudioEngine();
+
+        // Make sure audio context is resumed after creation
+        if (audioEngine.audioContext && audioEngine.audioContext.state === 'suspended') {
+            try {
+                await audioEngine.audioContext.resume();
+            } catch (err) {
+                console.warn('Audio context failed to start:', err);
+            }
+        }
+
+        vm.attachAudioEngine(audioEngine);
+
+        new LoadingProgress(progress => {
+            const setElement = (name, value) => {
+                document.getElementsByClassName(name)[0].innerText = value;
+            };
+            const sinceLoadStart = key => (
+                `(${(window[key] || Date.now()) - window.ScratchVMLoadStart}ms)`
+            );
+
+            setElement('loading-total', 1);
+            setElement('loading-complete', progress.dataLoaded);
+            setElement('loading-time', sinceLoadStart('ScratchVMLoadDataEnd'));
+
+            setElement('loading-content-total', progress.contentTotal);
+            setElement('loading-content-complete', progress.contentComplete);
+            setElement('loading-content-time', sinceLoadStart('ScratchVMDownloadEnd'));
+
+            setElement('loading-hydrate-total', progress.hydrateTotal);
+            setElement('loading-hydrate-complete', progress.hydrateComplete);
+            setElement('loading-hydrate-time', sinceLoadStart('ScratchVMLoadEnd'));
+
+            if (progress.memoryPeak) {
+                setElement('loading-memory-current',
+                    `${(progress.memoryCurrent / 1000000).toFixed(0)}MB`
+                );
+                setElement('loading-memory-peak',
+                    `${(progress.memoryPeak / 1000000).toFixed(0)}MB`
+                );
+            }
+        }).on(storage, vm);
+
+        let warmUpTime = 4000;
+        let maxRecordedTime = 6000;
+
+        if (location.hash) {
+            const split = location.hash.substring(1).split(',');
+            if (split[1] && split[1].length > 0) {
+                warmUpTime = Number(split[1]);
+            }
+            maxRecordedTime = Number(split[2] || '0') || 6000;
+        }
+
+        // Load the local project file
+        const projectId = loadProject();
+        const response = await fetch(`${projectId}.sb3`);
+        if (!response.ok) {
+            throw new Error(`Failed to load project: ${response.statusText}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        await vm.loadProject(arrayBuffer);
+
+        new ProfilerRun({
+            vm,
+            warmUpTime,
+            maxRecordedTime
+        }).run();
+
+        // Feed mouse events as VM I/O events.
+        document.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            const coordinates = {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+                canvasWidth: rect.width,
+                canvasHeight: rect.height
+            };
+            Scratch.vm.postIOData('mouse', coordinates);
+        });
+        canvas.addEventListener('mousedown', e => {
+            const rect = canvas.getBoundingClientRect();
+            const data = {
+                isDown: true,
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+                canvasWidth: rect.width,
+                canvasHeight: rect.height
+            };
+            Scratch.vm.postIOData('mouse', data);
+            e.preventDefault();
+        });
+        canvas.addEventListener('mouseup', e => {
+            const rect = canvas.getBoundingClientRect();
+            const data = {
+                isDown: false,
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+                canvasWidth: rect.width,
+                canvasHeight: rect.height
+            };
+            Scratch.vm.postIOData('mouse', data);
+            e.preventDefault();
+        });
+
+        // Feed keyboard events as VM I/O events.
+        document.addEventListener('keydown', e => {
+            // Don't capture keys intended for inputs.
+            if (e.target !== document && e.target !== document.body) {
+                return;
+            }
+            Scratch.vm.postIOData('keyboard', {
+                keyCode: e.keyCode,
+                isDown: true
+            });
+            e.preventDefault();
+        });
+        document.addEventListener('keyup', e => {
+            // Always capture up events,
+            // even those that have switched to other targets.
+            Scratch.vm.postIOData('keyboard', {
+                keyCode: e.keyCode,
+                isDown: false
+            });
+            // E.g., prevent scroll.
+            if (e.target !== document && e.target !== document.body) {
+                e.preventDefault();
+            }
+        });
+
+        // Run threads
+        vm.start();
+    } catch (err) {
+        console.error('Error in runBenchmark:', err);
+        throw err;
     }
-    return assetUrlParts.join('');
-};
+}
 
 /**
- * @param {Asset} asset - calculate a URL for this asset.
- * @returns {string} a URL to download a project asset (PNG, WAV, etc.)
+ * LoadingProgress class to track and report loading progress.
  */
-const getAssetUrl = function (asset) {
-    const assetUrlParts = [
-        ASSET_SERVER,
-        'internalapi/asset/',
-        asset.assetId,
-        '.',
-        asset.dataFormat,
-        '/get/'
-    ];
-    return assetUrlParts.join('');
-};
-
 class LoadingProgress {
-    constructor (callback) {
+    constructor(callback) {
         this.dataLoaded = 0;
         this.contentTotal = 0;
         this.contentComplete = 0;
@@ -123,14 +270,14 @@ class LoadingProgress {
         this.callback = callback;
     }
 
-    sampleMemory () {
+    sampleMemory() {
         if (window.performance && window.performance.memory) {
             this.memoryCurrent = window.performance.memory.usedJSHeapSize;
             this.memoryPeak = Math.max(this.memoryCurrent, this.memoryPeak);
         }
     }
 
-    attachHydrateMiddleware (middleware) {
+    attachHydrateMiddleware(middleware) {
         const _this = this;
         middleware.push((args, next) => {
             _this.hydrateTotal += 1;
@@ -146,7 +293,7 @@ class LoadingProgress {
         });
     }
 
-    on (storage, vm) {
+    on(storage, vm) {
         const _this = this;
 
         this.attachHydrateMiddleware(costumeMiddleware);
@@ -156,7 +303,7 @@ class LoadingProgress {
         storage.webHelper.load = function (...args) {
             if (_this.dataLoaded === 0 && window.performance) {
                 // Mark in browser inspectors how long it takes to load the
-                // projects initial data file.
+                // project's initial data file.
                 performance.mark('Scratch.LoadDataStart');
             }
 
@@ -189,8 +336,7 @@ class LoadingProgress {
 
                 if (_this.contentComplete && _this.contentComplete === _this.contentTotal) {
                     if (window.performance) {
-                        // How long did it take to download the html, js, and
-                        // all the project assets?
+                        // How long did it take to download all project assets?
                         performance.mark('Scratch.DownloadEnd');
                         performance.measure('Scratch.Download', 'Scratch.DownloadStart', 'Scratch.DownloadEnd');
                     }
@@ -204,69 +350,39 @@ class LoadingProgress {
             return result;
         };
         vm.runtime.on(Runtime.PROJECT_LOADED, () => {
-            // Currently LoadingProgress tracks when the data has been loaded
-            // and not when the data has been decoded. It may be difficult to
-            // track that but it isn't hard to track when its all been decoded.
             if (window.performance) {
-                // How long did it take to load and hydrate the html, js, and
-                // all the project assets?
+                // How long did it take to load and hydrate all assets?
                 performance.mark('Scratch.LoadEnd');
                 performance.measure('Scratch.Load', 'Scratch.LoadStart', 'Scratch.LoadEnd');
             }
 
             window.ScratchVMLoadEnd = Date.now();
 
-            // With this event lets update LoadingProgress a final time so its
-            // displayed loading time is accurate.
+            // Update LoadingProgress a final time
             _this.sampleMemory();
             _this.callback(_this);
         });
     }
 }
 
-class StatTable {
-    constructor ({table, keys, viewOf, isSlow}) {
-        this.table = table;
-        if (keys) {
-            this.keys = keys;
-        }
-        if (viewOf) {
-            this.viewOf = viewOf;
-        }
-        if (isSlow) {
-            this.isSlow = isSlow;
-        }
-    }
-
-    render () {
-        const table = this.table;
-        Array.from(table.children)
-            .forEach(node => table.removeChild(node));
-        const keys = this.keys();
-        for (const key of keys) {
-            this.viewOf(key).render({
-                table,
-                isSlow: frame => this.isSlow(key, frame)
-            });
-        }
-    }
-}
-
+/**
+ * StatView class to represent statistical data for a specific item.
+ */
 class StatView {
-    constructor (name) {
+    constructor(name) {
         this.name = name;
         this.executions = 0;
         this.selfTime = 0;
         this.totalTime = 0;
     }
 
-    update (selfTime, totalTime, count) {
+    update(selfTime, totalTime, count) {
         this.executions += count;
         this.selfTime += selfTime;
         this.totalTime += totalTime;
     }
 
-    render ({table, isSlow}) {
+    render({ table, isSlow }) {
         const row = document.createElement('tr');
         let cell = document.createElement('td');
         cell.innerText = this.name;
@@ -279,8 +395,7 @@ class StatView {
         cell = document.createElement('td');
         cell.style.textAlign = 'right';
         cell.innerText = '---';
-        // Truncate selfTime. Value past the microsecond are floating point
-        // noise.
+        // Truncate selfTime.
         this.selfTime = Math.floor(this.selfTime * 1000) / 1000;
         if (this.selfTime > 0) {
             cell.innerText = (this.selfTime / 1000).toFixed(3);
@@ -290,8 +405,7 @@ class StatView {
         cell = document.createElement('td');
         cell.style.textAlign = 'right';
         cell.innerText = '---';
-        // Truncate totalTime. Value past the microsecond are floating point
-        // noise.
+        // Truncate totalTime.
         this.totalTime = Math.floor(this.totalTime * 1000) / 1000;
         if (this.totalTime > 0) {
             cell.innerText = (this.totalTime / 1000).toFixed(3);
@@ -307,11 +421,39 @@ class StatView {
     }
 }
 
+/**
+ * StatTable class to manage and render a table of statistics.
+ */
+class StatTable {
+    constructor({ table, keys, viewOf, isSlow }) {
+        this.table = table;
+        this.keys = keys;
+        this.viewOf = viewOf;
+        this.isSlow = isSlow;
+    }
+
+    render() {
+        const table = this.table;
+        Array.from(table.children)
+            .forEach(node => table.removeChild(node));
+        const keys = this.keys();
+        for (const key of keys) {
+            this.viewOf(key).render({
+                table,
+                isSlow: frame => this.isSlow(key, frame)
+            });
+        }
+    }
+}
+
+/**
+ * RunningStats class to collect statistics during VM execution.
+ */
 class RunningStats {
-    constructor (profiler) {
+    constructor(profiler) {
         this.stepThreadsInnerId = profiler.idByName('Sequencer.stepThreads#inner');
         this.blockFunctionId = profiler.idByName('blockFunction');
-        this.stpeThreadsId = profiler.idByName('Sequencer.stepThreads');
+        this.stepThreadsId = profiler.idByName('Sequencer.stepThreads');
 
         this.recordedTime = 0;
         this.executed = {
@@ -320,8 +462,8 @@ class RunningStats {
         };
     }
 
-    update (id, arg, selfTime, totalTime, count) {
-        if (id === this.stpeThreadsId) {
+    update(id, arg, selfTime, totalTime, count) {
+        if (id === this.stepThreadsId) {
             this.recordedTime += totalTime;
         } else if (id === this.stepThreadsInnerId) {
             this.executed.steps += count;
@@ -331,133 +473,32 @@ class RunningStats {
     }
 }
 
-const WORK_TIME = 0.75;
-
+/**
+ * RunningStatsView class to display running statistics.
+ */
 class RunningStatsView {
-    constructor ({runningStats, maxRecordedTime, dom}) {
-        this.recordedTimeDom =
-            dom.getElementsByClassName('profile-count-amount-recorded')[0];
-        this.stepsLoopedDom =
-            dom.getElementsByClassName('profile-count-steps-looped')[0];
-        this.blocksExecutedDom =
-            dom.getElementsByClassName('profile-count-blocks-executed')[0];
-
-        this.maxRecordedTime = maxRecordedTime;
-        this.maxWorkedTime = maxRecordedTime * WORK_TIME;
+    constructor({ dom, runningStats, maxRecordedTime }) {
+        this.dom = dom;
         this.runningStats = runningStats;
+        this.maxRecordedTime = maxRecordedTime;
     }
 
-    render () {
-        const {
-            runningStats,
-            recordedTimeDom,
-            stepsLoopedDom,
-            blocksExecutedDom
-        } = this;
-        const {executed} = runningStats;
-        const fractionWorked = runningStats.recordedTime / this.maxWorkedTime;
-        recordedTimeDom.innerText = `${(fractionWorked * 100).toFixed(1)} %`;
-        stepsLoopedDom.innerText = executed.steps;
-        blocksExecutedDom.innerText = executed.blocks;
+    render() {
+        const { dom, runningStats, maxRecordedTime } = this;
+        dom.querySelector('.profile-count-steps').innerText = runningStats.executed.steps;
+        dom.querySelector('.profile-count-blocks').innerText = runningStats.executed.blocks;
+        dom.querySelector('.profile-count-time').innerText = (runningStats.recordedTime / 1000).toFixed(3);
+
+        const progress = Math.min(runningStats.recordedTime / maxRecordedTime, 1) * 100;
+        dom.querySelector('.profile-count-progress').style.width = `${progress}%`;
     }
 }
 
-class Frames {
-    constructor (profiler) {
-        this.profiler = profiler;
-
-        this.frames = [];
-    }
-
-    update (id, arg, selfTime, totalTime, count) {
-        if (id < 0) return;
-        if (!this.frames[id]) {
-            this.frames[id] = new StatView(this.profiler.nameById(id));
-        }
-        this.frames[id].update(selfTime, totalTime, count);
-    }
-}
-
-const frameOrder = [
-    'blockFunction',
-    'execute',
-    'Sequencer.stepThread',
-    'Sequencer.stepThreads#inner',
-    'Sequencer.stepThreads',
-    'RenderWebGL.draw',
-    'Runtime._step'
-];
-
-class FramesTable extends StatTable {
-    constructor (options) {
-        super(options);
-
-        this.profiler = options.profiler;
-        this.frames = options.frames;
-    }
-
-    keys () {
-        const keys = Object.keys(this.frames.frames)
-            .map(id => this.profiler.nameById(Number(id)));
-        keys.sort((a, b) => frameOrder.indexOf(a) - frameOrder.indexOf(b));
-        return keys;
-    }
-
-    viewOf (key) {
-        return this.frames.frames[this.profiler.idByName(key)];
-    }
-
-    isSlow () {
-        return false;
-    }
-}
-
-class Opcodes {
-    constructor (profiler) {
-        this.blockFunctionId = profiler.idByName('blockFunction');
-
-        this.opcodes = {};
-    }
-
-    update (id, arg, selfTime, totalTime, count) {
-        if (id === this.blockFunctionId) {
-            if (!this.opcodes[arg]) {
-                this.opcodes[arg] = new StatView(arg);
-            }
-            this.opcodes[arg].update(selfTime, totalTime, count);
-        }
-    }
-}
-
-class OpcodeTable extends StatTable {
-    constructor (options) {
-        super(options);
-
-        this.profiler = options.profiler;
-        this.opcodes = options.opcodes;
-        this.frames = options.frames;
-    }
-
-    keys () {
-        const keys = Object.keys(this.opcodes.opcodes);
-        keys.sort();
-        return keys;
-    }
-
-    viewOf (key) {
-        return this.opcodes.opcodes[key];
-    }
-
-    isSlow (key) {
-        const blockFunctionTotalTime = this.frames.frames[this.profiler.idByName('blockFunction')].totalTime;
-        const rowTotalTime = this.opcodes.opcodes[key].totalTime;
-        const percentOfRun = rowTotalTime / blockFunctionTotalTime;
-        return percentOfRun > SLOW;
-    }
-}
-
+/**
+ * ProfilerRun class to manage the profiling run.
+ */
 class ProfilerRun {
-    constructor ({vm, maxRecordedTime, warmUpTime}) {
+    constructor({ vm, maxRecordedTime, warmUpTime }) {
         this.vm = vm;
         this.maxRecordedTime = maxRecordedTime;
         this.warmUpTime = warmUpTime;
@@ -469,7 +510,6 @@ class ProfilerRun {
         const runningStats = this.runningStats = new RunningStats(profiler);
         const runningStatsView = this.runningStatsView = new RunningStatsView({
             dom: document.getElementsByClassName('profile-count-group')[0],
-
             runningStats,
             maxRecordedTime
         });
@@ -479,7 +519,6 @@ class ProfilerRun {
             table: document
                 .getElementsByClassName('profile-count-frame-table')[0]
                 .getElementsByTagName('tbody')[0],
-
             profiler,
             frames
         });
@@ -489,14 +528,13 @@ class ProfilerRun {
             table: document
                 .getElementsByClassName('profile-count-opcode-table')[0]
                 .getElementsByTagName('tbody')[0],
-
             profiler,
             opcodes,
             frames
         });
 
         const stepId = profiler.idByName('Runtime._step');
-        profiler.onFrame = ({id, arg, selfTime, totalTime, count}) => {
+        profiler.onFrame = ({ id, arg, selfTime, totalTime, count }) => {
             if (id === stepId) {
                 runningStatsView.render();
             }
@@ -507,7 +545,7 @@ class ProfilerRun {
         };
     }
 
-    run () {
+    run() {
         this.projectId = loadProject();
 
         window.parent.postMessage({
@@ -554,8 +592,8 @@ class ProfilerRun {
         });
     }
 
-    render (json) {
-        const {fixture} = json;
+    render(json) {
+        const { fixture } = json;
         document.querySelector('[type=text]').value = [
             fixture.projectId,
             fixture.warmUpTime,
@@ -579,155 +617,110 @@ class ProfilerRun {
 }
 
 /**
- * Run the benchmark with given parameters in the location's hash field or
- * using defaults.
+ * Frames class to collect frame data during profiling.
  */
-const runBenchmark = function () {
-    // Lots of global variables to make debugging easier
-    // Instantiate the VM.
-    const vm = new VirtualMachine();
-    Scratch.vm = vm;
-
-    vm.setTurboMode(true);
-
-    const storage = new ScratchStorage();
-    const AssetType = storage.AssetType;
-    storage.addWebSource([AssetType.Project], getProjectUrl);
-    storage.addWebSource([AssetType.ImageVector, AssetType.ImageBitmap, AssetType.Sound], getAssetUrl);
-    vm.attachStorage(storage);
-
-    new LoadingProgress(progress => {
-        const setElement = (name, value) => {
-            document.getElementsByClassName(name)[0].innerText = value;
-        };
-        const sinceLoadStart = key => (
-            `(${(window[key] || Date.now()) - window.ScratchVMLoadStart}ms)`
-        );
-
-        setElement('loading-total', 1);
-        setElement('loading-complete', progress.dataLoaded);
-        setElement('loading-time', sinceLoadStart('ScratchVMLoadDataEnd'));
-
-        setElement('loading-content-total', progress.contentTotal);
-        setElement('loading-content-complete', progress.contentComplete);
-        setElement('loading-content-time', sinceLoadStart('ScratchVMDownloadEnd'));
-
-        setElement('loading-hydrate-total', progress.hydrateTotal);
-        setElement('loading-hydrate-complete', progress.hydrateComplete);
-        setElement('loading-hydrate-time', sinceLoadStart('ScratchVMLoadEnd'));
-
-        if (progress.memoryPeak) {
-            setElement('loading-memory-current',
-                `${(progress.memoryCurrent / 1000000).toFixed(0)}MB`
-            );
-            setElement('loading-memory-peak',
-                `${(progress.memoryPeak / 1000000).toFixed(0)}MB`
-            );
-        }
-    }).on(storage, vm);
-
-    let warmUpTime = 4000;
-    let maxRecordedTime = 6000;
-
-    if (location.hash) {
-        const split = location.hash.substring(1).split(',');
-        if (split[1] && split[1].length > 0) {
-            warmUpTime = Number(split[1]);
-        }
-        maxRecordedTime = Number(split[2] || '0') || 6000;
+class Frames {
+    constructor(profiler) {
+        this.profiler = profiler;
+        this.frames = [];
     }
 
-    new ProfilerRun({
-        vm,
-        warmUpTime,
-        maxRecordedTime
-    }).run();
-
-    // Instantiate the renderer and connect it to the VM.
-    const canvas = document.getElementById('scratch-stage');
-    const renderer = new ScratchRender(canvas);
-    Scratch.renderer = renderer;
-    vm.attachRenderer(renderer);
-    const audioEngine = new AudioEngine();
-    vm.attachAudioEngine(audioEngine);
-    vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
-
-    // Feed mouse events as VM I/O events.
-    document.addEventListener('mousemove', e => {
-        const rect = canvas.getBoundingClientRect();
-        const coordinates = {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            canvasWidth: rect.width,
-            canvasHeight: rect.height
-        };
-        Scratch.vm.postIOData('mouse', coordinates);
-    });
-    canvas.addEventListener('mousedown', e => {
-        const rect = canvas.getBoundingClientRect();
-        const data = {
-            isDown: true,
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            canvasWidth: rect.width,
-            canvasHeight: rect.height
-        };
-        Scratch.vm.postIOData('mouse', data);
-        e.preventDefault();
-    });
-    canvas.addEventListener('mouseup', e => {
-        const rect = canvas.getBoundingClientRect();
-        const data = {
-            isDown: false,
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
-            canvasWidth: rect.width,
-            canvasHeight: rect.height
-        };
-        Scratch.vm.postIOData('mouse', data);
-        e.preventDefault();
-    });
-
-    // Feed keyboard events as VM I/O events.
-    document.addEventListener('keydown', e => {
-        // Don't capture keys intended for Blockly inputs.
-        if (e.target !== document && e.target !== document.body) {
-            return;
+    update(id, arg, selfTime, totalTime, count) {
+        const name = this.profiler.nameById(id);
+        let frame = this.frames.find(f => f.name === name);
+        if (!frame) {
+            frame = new StatView(name);
+            this.frames.push(frame);
         }
-        Scratch.vm.postIOData('keyboard', {
-            keyCode: e.keyCode,
-            isDown: true
-        });
-        e.preventDefault();
-    });
-    document.addEventListener('keyup', e => {
-        // Always capture up events,
-        // even those that have switched to other targets.
-        Scratch.vm.postIOData('keyboard', {
-            keyCode: e.keyCode,
-            isDown: false
-        });
-        // E.g., prevent scroll.
-        if (e.target !== document && e.target !== document.body) {
-            e.preventDefault();
-        }
-    });
+        frame.update(selfTime, totalTime, count);
+    }
+}
 
-    // Run threads
-    vm.start();
-};
+/**
+ * FramesTable class to render frames data.
+ */
+class FramesTable {
+    constructor({ table, profiler, frames }) {
+        this.table = table;
+        this.profiler = profiler;
+        this.frames = frames;
+    }
+
+    render() {
+        const sortedFrames = this.frames.frames.sort((a, b) => b.selfTime - a.selfTime);
+        const keys = sortedFrames.map(frame => frame.name);
+
+        const statTable = new StatTable({
+            table: this.table,
+            keys: () => keys,
+            viewOf: name => this.frames.frames.find(frame => frame.name === name),
+            isSlow: (key, frame) => frame.selfTime > SLOW
+        });
+
+        statTable.render();
+    }
+}
+
+/**
+ * Opcodes class to collect opcode execution data.
+ */
+class Opcodes {
+    constructor(profiler) {
+        this.profiler = profiler;
+        this.opcodes = {};
+    }
+
+    update(id, arg, selfTime, totalTime, count) {
+        if (arg && arg.opcode) {
+            const opcode = arg.opcode;
+            let stat = this.opcodes[opcode];
+            if (!stat) {
+                stat = new StatView(opcode);
+                this.opcodes[opcode] = stat;
+            }
+            stat.update(selfTime, totalTime, count);
+        }
+    }
+}
+
+/**
+ * OpcodeTable class to render opcode execution data.
+ */
+class OpcodeTable {
+    constructor({ table, profiler, opcodes, frames }) {
+        this.table = table;
+        this.profiler = profiler;
+        this.opcodes = opcodes;
+        this.frames = frames;
+    }
+
+    render() {
+        const sortedOpcodes = Object.keys(this.opcodes.opcodes).sort((a, b) => {
+            return this.opcodes.opcodes[b].selfTime - this.opcodes.opcodes[a].selfTime;
+        });
+
+        const statTable = new StatTable({
+            table: this.table,
+            keys: () => sortedOpcodes,
+            viewOf: opcode => this.opcodes.opcodes[opcode],
+            isSlow: (key, frame) => frame.selfTime > SLOW
+        });
+
+        statTable.render();
+    }
+}
 
 /**
  * Render previously run benchmark data.
- * @param {object} json data from a previous benchmark run.
+ * @param {object} json - Data from a previous benchmark run.
  */
-const renderBenchmarkData = function (json) {
+function renderBenchmarkData(json) {
     const vm = new VirtualMachine();
-    new ProfilerRun({vm}).render(json);
+    new ProfilerRun({ vm }).render(json);
     setShareLink(json);
-};
+}
 
-const onload = function () {
+function onload() {
     if (location.hash.substring(1).startsWith('view')) {
         document.body.className = 'render';
         const data = location.hash.substring(6);
@@ -735,9 +728,10 @@ const onload = function () {
         const json = JSON.parse(frozen);
         renderBenchmarkData(json);
     } else {
-        runBenchmark();
+        // Wait for user interaction before running benchmark
+        console.log('Click "run" to start benchmark');
     }
-};
+}
 
 window.onhashchange = function () {
     location.reload();
