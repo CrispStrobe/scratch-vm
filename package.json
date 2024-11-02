@@ -108,7 +108,7 @@
     "pngjs": "3.4.0",
     "process": "^0.11.10",
     "scratch-blocks": "1.1.206",
-    "scratch-l10n": "^3.1.20181129204552",
+    "scratch-l10n": "github:CrispStrobe/scratch-l10n#develop",
     "scratch-render-fonts": "1.0.117",
     "scratch-semantic-release-config": "1.0.16",
     "scratch-webpack-configuration": "^1.3.0",
