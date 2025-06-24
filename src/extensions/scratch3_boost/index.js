@@ -1204,6 +1204,9 @@ class Boost {
             this.setLEDMode();
             this.setLED(0x0000FF);
             break;
+        case BoostIO.LIGHT:
+            // mode = BoostMode.LIGHT;
+            break;
         case BoostIO.TILT:
             mode = BoostMode.TILT;
             break;
@@ -1557,6 +1560,26 @@ class Scratch3BoostBlocks {
                         HUE: {
                             type: ArgumentType.NUMBER,
                             defaultValue: 50
+                        }
+                    }
+                },
+                {
+                    opcode: 'setLightBrightness',
+                    text: formatMessage({
+                        id: 'boost.setLightBrightness',
+                        default: 'set light on port [PORT_ID] brightness to [BRIGHTNESS] %',
+                        description: 'Set the brightness of the external LEGO light (88005).'
+                    }),
+                    blockType: BlockType.COMMAND,
+                    arguments: {
+                        PORT_ID: {
+                            type: ArgumentType.STRING,
+                            menu: 'MOTOR_REPORTER_ID', // Reuses the menu with A, B, C, D
+                            defaultValue: BoostMotorLabel.C
+                        },
+                        BRIGHTNESS: {
+                            type: ArgumentType.NUMBER,
+                            defaultValue: 100
                         }
                     }
                 }
@@ -2214,6 +2237,44 @@ class Scratch3BoostBlocks {
             }, BoostBLE.sendInterval);
         });
     }
-}
+
+    /**
+     * Set the brightness of the external light (88005).
+     * @param {object} args - the block's arguments.
+     * @property {string} PORT_ID - the port the light is on (A, B, C, or D).
+     * @property {number} BRIGHTNESS - the brightness level for the light.
+     * @return {Promise} - a promise that resolves after the send interval.
+     */
+    setLightBrightness (args) {
+        const portName = Cast.toString(args.PORT_ID);
+        const portID = BoostPort[portName];
+
+        // Do nothing if the port is invalid or doesn't have a LIGHT attached.
+        if (typeof portID === 'undefined' || this._peripheral._ports[portID] !== BoostIO.LIGHT) {
+            return;
+        }
+
+        const brightness = MathUtil.clamp(Cast.toNumber(args.BRIGHTNESS), 0, 100);
+
+        const cmd = this._peripheral.generateOutputCommand(
+            portID,
+            BoostOutputExecution.EXECUTE_IMMEDIATELY,
+            BoostOutputSubCommand.WRITE_DIRECT_MODE_DATA,
+            [
+                0, // Mode 0 for brightness control
+                brightness
+            ]
+        );
+
+        this._peripheral.send(BoostBLE.characteristic, cmd);
+
+        // Return a promise to prevent the next block from running immediately.
+        return new Promise(resolve => {
+            window.setTimeout(() => {
+                resolve();
+            }, BoostBLE.sendInterval);
+        });
+    }
+} // End of Scratch3BoostBlocks class
 
 module.exports = Scratch3BoostBlocks;
